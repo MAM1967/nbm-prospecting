@@ -3,7 +3,18 @@ import OpenAI from "openai";
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export type EventType = 
+// Check if OpenAI API key is valid (not placeholder)
+function isValidApiKey(): boolean {
+  const key = process.env.OPENAI_API_KEY;
+  return (
+    !!key &&
+    key !== "your_openai_api_key_here" &&
+    key.length > 20 &&
+    key.startsWith("sk-")
+  );
+}
+
+export type EventType =
   | "rebrand"
   | "new_exec_hire"
   | "thought_leadership_spike"
@@ -20,22 +31,58 @@ interface DetectedEvent {
 
 // Keyword-based detection (fast, cheap)
 const EVENT_KEYWORDS: Record<EventType, string[]> = {
-  rebrand: ['rebrand', 'new brand', 'brand refresh', 'logo redesign', 'rebranding'],
-  new_exec_hire: ['hired', 'appoints', 'new ceo', 'new cmo', 'new cfo', 'joins as', 'named chief'],
-  thought_leadership_spike: ['publishes', 'article', 'podcast', 'keynote', 'speaking at', 'thought leader'],
-  hiring_surge: ['hiring', 'open positions', 'job openings', 'recruitment', 'expanding team'],
-  m_and_a: ['acquires', 'acquisition', 'merger', 'acquired by', 'merges with'],
-  office_expansion: ['new office', 'opens headquarters', 'expands to', 'new location'],
+  rebrand: [
+    "rebrand",
+    "new brand",
+    "brand refresh",
+    "logo redesign",
+    "rebranding",
+  ],
+  new_exec_hire: [
+    "hired",
+    "appoints",
+    "new ceo",
+    "new cmo",
+    "new cfo",
+    "joins as",
+    "named chief",
+  ],
+  thought_leadership_spike: [
+    "publishes",
+    "article",
+    "podcast",
+    "keynote",
+    "speaking at",
+    "thought leader",
+  ],
+  hiring_surge: [
+    "hiring",
+    "open positions",
+    "job openings",
+    "recruitment",
+    "expanding team",
+  ],
+  m_and_a: ["acquires", "acquisition", "merger", "acquired by", "merges with"],
+  office_expansion: [
+    "new office",
+    "opens headquarters",
+    "expands to",
+    "new location",
+  ],
 };
 
-export async function detectEvent(title: string, description: string, homepageSummary?: string): Promise<DetectedEvent | null> {
+export async function detectEvent(
+  title: string,
+  description: string,
+  homepageSummary?: string
+): Promise<DetectedEvent | null> {
   const text = `${title} ${description}`.toLowerCase();
 
   // First, try keyword detection
   for (const [eventType, keywords] of Object.entries(EVENT_KEYWORDS)) {
-    if (keywords.some(keyword => text.includes(keyword.toLowerCase()))) {
+    if (keywords.some((keyword) => text.includes(keyword.toLowerCase()))) {
       const companyName = extractCompanyName(title);
-      
+
       if (companyName) {
         return {
           eventType: eventType as EventType,
@@ -47,11 +94,25 @@ export async function detectEvent(title: string, description: string, homepageSu
     }
   }
 
-  // Fallback to LLM (only if keywords didn't match)
-  return await detectEventWithLLM(title, description, homepageSummary);
+  // Fallback to LLM (only if keywords didn't match and API key is valid)
+  if (isValidApiKey()) {
+    return await detectEventWithLLM(title, description, homepageSummary);
+  }
+
+  // If no API key, return null (keyword detection already tried)
+  return null;
 }
 
-async function detectEventWithLLM(title: string, description: string, homepageSummary?: string): Promise<DetectedEvent | null> {
+async function detectEventWithLLM(
+  title: string,
+  description: string,
+  homepageSummary?: string
+): Promise<DetectedEvent | null> {
+  // Double-check API key before making request
+  if (!isValidApiKey()) {
+    return null;
+  }
+
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-5",
@@ -94,10 +155,20 @@ Return ONLY:
       response_format: { type: "json_object" },
     });
 
-    const result = JSON.parse(response.choices[0].message.content || '{}');
+    const result = JSON.parse(response.choices[0].message.content || "{}");
     const eventType = result.event_type;
-    
-    if (eventType && Object.values(["rebrand", "new_exec_hire", "thought_leadership_spike", "hiring_surge", "m_and_a", "office_expansion"]).includes(eventType)) {
+
+    if (
+      eventType &&
+      Object.values([
+        "rebrand",
+        "new_exec_hire",
+        "thought_leadership_spike",
+        "hiring_surge",
+        "m_and_a",
+        "office_expansion",
+      ]).includes(eventType)
+    ) {
       const companyName = extractCompanyName(title);
       return {
         eventType: eventType as EventType,
@@ -106,29 +177,32 @@ Return ONLY:
         summary: description.slice(0, 300),
       };
     }
-    
+
     return null;
-  } catch (error) {
-    console.error('LLM detection failed:', error);
+  } catch (error: any) {
+    // Only log authentication errors once, not for every article
+    if (error?.code === "invalid_api_key" || error?.status === 401) {
+      // Log once per process, not per article
+      if (!(global as any).__openai_key_warned) {
+        console.warn(
+          "OpenAI API key is invalid or missing. LLM-based event detection disabled. Using keyword-based detection only."
+        );
+        (global as any).__openai_key_warned = true;
+      }
+    } else {
+      // Log other errors normally
+      console.error("LLM detection failed:", error?.message || error);
+    }
     return null;
   }
 }
 
+// Import company extractor to use same logic
+import { extractCompanyName as extractCompanyNameFromText } from "./company-extractor";
+
 function extractCompanyName(title: string): string | null {
-  // Simple heuristic: company names are often capitalized words before verbs
-  const patterns = [
-    /^([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\s(?:appoints|hires|announces|launches|acquires)/,
-    /^([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\s/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = title.match(pattern);
-    if (match) {
-      return match[1];
-    }
-  }
-
-  return null;
+  // Use the same extraction logic as company-extractor for consistency
+  return extractCompanyNameFromText(title, "");
 }
 
 // Map event types to issues per PRD
@@ -136,7 +210,11 @@ export function mapIssuesToEvent(eventType: EventType): string[] {
   const ISSUE_MAP: Record<EventType, string[]> = {
     rebrand: ["Positioning", "Differentiation", "Funnel performance"],
     new_exec_hire: ["BD alignment", "Positioning", "Thought leadership"],
-    thought_leadership_spike: ["Thought leadership", "Demand Gen", "Differentiation"],
+    thought_leadership_spike: [
+      "Thought leadership",
+      "Demand Gen",
+      "Differentiation",
+    ],
     hiring_surge: ["Demand Gen", "Funnel performance", "BD alignment"],
     m_and_a: ["Positioning", "Differentiation", "BD alignment"],
     office_expansion: ["Demand Gen", "Funnel performance", "BD alignment"],

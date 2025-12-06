@@ -3,6 +3,17 @@ import OpenAI from "openai";
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Check if OpenAI API key is valid (not placeholder)
+function isValidApiKey(): boolean {
+  const key = process.env.OPENAI_API_KEY;
+  return (
+    !!key &&
+    key !== "your_openai_api_key_here" &&
+    key.length > 20 &&
+    key.startsWith("sk-")
+  );
+}
+
 // Industry types per PRD section 2.1
 export type Industry =
   | "Tech, SaaS, B2B software"
@@ -39,6 +50,11 @@ async function classifyIndustryWithLLM(
   companyName: string,
   homepageSummary: string
 ): Promise<Industry | null> {
+  // Skip LLM if API key is invalid
+  if (!isValidApiKey()) {
+    return null; // Will fall back to heuristics
+  }
+
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-5",
@@ -97,8 +113,19 @@ Return:
     };
 
     return industryMap[industry] || null;
-  } catch (error) {
-    console.error("Error classifying industry with LLM:", error);
+  } catch (error: any) {
+    // Only log authentication errors once
+    if (error?.code === "invalid_api_key" || error?.status === 401) {
+      if (!(global as any).__openai_key_warned) {
+        console.warn("OpenAI API key is invalid. LLM features disabled.");
+        (global as any).__openai_key_warned = true;
+      }
+    } else {
+      console.error(
+        "Error classifying industry with LLM:",
+        error?.message || error
+      );
+    }
     return null;
   }
 }
@@ -114,42 +141,54 @@ function classifyIndustryWithHeuristics(
 
   // Tech/SaaS keywords
   if (
-    text.match(/\b(software|saas|platform|api|cloud|tech|digital|app|solution|system)\b/i)
+    text.match(
+      /\b(software|saas|platform|api|cloud|tech|digital|app|solution|system)\b/i
+    )
   ) {
     return "Tech, SaaS, B2B software";
   }
 
   // Healthcare keywords
   if (
-    text.match(/\b(health|medical|pharma|biotech|clinical|patient|hospital|diagnostic)\b/i)
+    text.match(
+      /\b(health|medical|pharma|biotech|clinical|patient|hospital|diagnostic)\b/i
+    )
   ) {
     return "Healthcare & life sciences";
   }
 
   // E-commerce keywords
   if (
-    text.match(/\b(ecommerce|e-commerce|retail|store|shop|marketplace|dtc|direct to consumer)\b/i)
+    text.match(
+      /\b(ecommerce|e-commerce|retail|store|shop|marketplace|dtc|direct to consumer)\b/i
+    )
   ) {
     return "E-commerce & DTC brands";
   }
 
   // Manufacturing keywords
   if (
-    text.match(/\b(manufacturing|factory|production|supply chain|logistics|distribution|industrial)\b/i)
+    text.match(
+      /\b(manufacturing|factory|production|supply chain|logistics|distribution|industrial)\b/i
+    )
   ) {
     return "Manufacturing & distribution";
   }
 
   // Hospitality/Retail keywords
   if (
-    text.match(/\b(hotel|restaurant|hospitality|retail|store|boutique|food service)\b/i)
+    text.match(
+      /\b(hotel|restaurant|hospitality|retail|store|boutique|food service)\b/i
+    )
   ) {
     return "Hospitality & retail";
   }
 
   // Nonprofit keywords
   if (
-    text.match(/\b(nonprofit|non-profit|charity|foundation|mission|social impact|ngo)\b/i)
+    text.match(
+      /\b(nonprofit|non-profit|charity|foundation|mission|social impact|ngo)\b/i
+    )
   ) {
     return "Nonprofits & mission-driven orgs";
   }
@@ -157,4 +196,3 @@ function classifyIndustryWithHeuristics(
   // Default to Professional Services
   return "Professional services";
 }
-

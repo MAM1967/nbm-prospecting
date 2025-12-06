@@ -1,14 +1,25 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import * as schema from "@shared/schema";
-import type { User, InsertUser, Company, InsertCompany, Event, InsertEvent, Leadership, InsertLeadership, ConversationStarter, InsertConversationStarter } from "@shared/schema";
+import type {
+  User,
+  InsertUser,
+  Company,
+  InsertCompany,
+  Event,
+  InsertEvent,
+  Leadership,
+  InsertLeadership,
+  ConversationStarter,
+  InsertConversationStarter,
+} from "@shared/schema";
 
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
+    "DATABASE_URL must be set. Did you forget to provision a database?"
   );
 }
 
@@ -25,25 +36,38 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUserIndustry(userId: string, industry: string): Promise<void>;
   getAllUsers(): Promise<User[]>;
-  
+
   // Company operations
   getOrCreateCompany(data: InsertCompany): Promise<Company>;
   getCompanyById(id: number): Promise<Company | undefined>;
-  
+
   // Event operations
   createEvent(event: InsertEvent): Promise<Event>;
   getRecentEvents(limit?: number): Promise<Event[]>;
   getEventsByIndustry(industry: string, limit?: number): Promise<Event[]>;
   getEventById(id: number): Promise<Event | undefined>;
-  
+  // Check if event already exists (deduplication)
+  eventExists(
+    companyId: number,
+    eventType: string,
+    sourceUrl: string
+  ): Promise<boolean>;
+  getEventByCompanyAndUrl(
+    companyId: number,
+    sourceUrl: string
+  ): Promise<Event | undefined>;
+  deleteEvent(eventId: number): Promise<void>;
+
   // Leadership operations
   createLeadership(leadership: InsertLeadership): Promise<Leadership>;
   getLeadershipByCompany(companyId: number): Promise<Leadership[]>;
-  
+
   // Conversation Starter operations
-  createConversationStarter(starter: InsertConversationStarter): Promise<ConversationStarter>;
+  createConversationStarter(
+    starter: InsertConversationStarter
+  ): Promise<ConversationStarter>;
   getStartersByEvent(eventId: number): Promise<ConversationStarter[]>;
-  
+
   // Aggregate query for full event data (joins)
   getEnrichedEvents(industry?: string, limit?: number): Promise<any[]>;
 }
@@ -95,7 +119,10 @@ export class Storage implements IStorage {
       return existing[0];
     }
 
-    const [newCompany] = await db.insert(schema.companies).values(data).returning();
+    const [newCompany] = await db
+      .insert(schema.companies)
+      .values(data)
+      .returning();
     return newCompany;
   }
 
@@ -121,7 +148,10 @@ export class Storage implements IStorage {
       .limit(limit);
   }
 
-  async getEventsByIndustry(industry: string, limit: number = 20): Promise<Event[]> {
+  async getEventsByIndustry(
+    industry: string,
+    limit: number = 20
+  ): Promise<Event[]> {
     // Join with companies to filter by industry
     return await db
       .select({
@@ -137,7 +167,10 @@ export class Storage implements IStorage {
         processedAt: schema.events.processedAt,
       })
       .from(schema.events)
-      .innerJoin(schema.companies, eq(schema.events.companyId, schema.companies.id))
+      .innerJoin(
+        schema.companies,
+        eq(schema.events.companyId, schema.companies.id)
+      )
       .where(eq(schema.companies.industry, industry))
       .orderBy(desc(schema.events.date))
       .limit(limit);
@@ -152,8 +185,49 @@ export class Storage implements IStorage {
     return event;
   }
 
+  async eventExists(
+    companyId: number,
+    eventType: string,
+    sourceUrl: string
+  ): Promise<boolean> {
+    const [existing] = await db
+      .select()
+      .from(schema.events)
+      .where(
+        sql`${schema.events.companyId} = ${companyId} AND ${schema.events.eventType} = ${eventType} AND ${schema.events.sourceUrl} = ${sourceUrl}`
+      )
+      .limit(1);
+    return !!existing;
+  }
+
+  async getEventByCompanyAndUrl(
+    companyId: number,
+    sourceUrl: string
+  ): Promise<Event | undefined> {
+    const [event] = await db
+      .select()
+      .from(schema.events)
+      .where(
+        sql`${schema.events.companyId} = ${companyId} AND ${schema.events.sourceUrl} = ${sourceUrl}`
+      )
+      .limit(1);
+    return event;
+  }
+
+  async deleteEvent(eventId: number): Promise<void> {
+    // Delete conversation starters first (foreign key constraint)
+    await db
+      .delete(schema.conversationStarters)
+      .where(eq(schema.conversationStarters.eventId, eventId));
+    // Delete the event
+    await db.delete(schema.events).where(eq(schema.events.id, eventId));
+  }
+
   async createLeadership(leadership: InsertLeadership): Promise<Leadership> {
-    const [newLeadership] = await db.insert(schema.leadership).values(leadership).returning();
+    const [newLeadership] = await db
+      .insert(schema.leadership)
+      .values(leadership)
+      .returning();
     return newLeadership;
   }
 
@@ -164,8 +238,13 @@ export class Storage implements IStorage {
       .where(eq(schema.leadership.companyId, companyId));
   }
 
-  async createConversationStarter(starter: InsertConversationStarter): Promise<ConversationStarter> {
-    const [newStarter] = await db.insert(schema.conversationStarters).values(starter).returning();
+  async createConversationStarter(
+    starter: InsertConversationStarter
+  ): Promise<ConversationStarter> {
+    const [newStarter] = await db
+      .insert(schema.conversationStarters)
+      .values(starter)
+      .returning();
     return newStarter;
   }
 
@@ -176,7 +255,10 @@ export class Storage implements IStorage {
       .where(eq(schema.conversationStarters.eventId, eventId));
   }
 
-  async getEnrichedEvents(industry?: string, limit: number = 20): Promise<any[]> {
+  async getEnrichedEvents(
+    industry?: string,
+    limit: number = 20
+  ): Promise<any[]> {
     // Complex join to get full event data with company, leadership, and starters
     let query = db
       .select({
@@ -184,7 +266,10 @@ export class Storage implements IStorage {
         company: schema.companies,
       })
       .from(schema.events)
-      .innerJoin(schema.companies, eq(schema.events.companyId, schema.companies.id))
+      .innerJoin(
+        schema.companies,
+        eq(schema.events.companyId, schema.companies.id)
+      )
       .orderBy(desc(schema.events.date))
       .limit(limit);
 
@@ -203,16 +288,21 @@ export class Storage implements IStorage {
           logoPlaceholder: row.company.logoPlaceholder || "tech",
           industry: row.company.industry || "Tech, SaaS, B2B software",
           eventType: row.event.eventType,
-          date: row.event.date.toISOString().split('T')[0],
+          date: row.event.date.toISOString().split("T")[0],
           summary: row.event.summary,
           issues: row.event.issues || [],
-          leadership: leadership.map(l => ({
-            name: l.name,
-            title: l.title,
-            verified: l.verified === 1,
-            profileUrl: l.profileUrl || undefined,
-          })),
-          starters: starters.map(s => ({
+          // Per PRD: Limit to 2 verified leads per company
+          leadership: leadership
+            .filter((l) => l.verified === 1)
+            .slice(0, 2)
+            .map((l) => ({
+              name: l.name,
+              title: l.title,
+              verified: l.verified === 1,
+              profileUrl: l.profileUrl || undefined,
+            })),
+          // Per PRD: Limit to 2 conversation starters per company
+          starters: starters.slice(0, 2).map((s) => ({
             role: s.role,
             starter: s.starter,
           })),

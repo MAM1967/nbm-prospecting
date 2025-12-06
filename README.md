@@ -21,13 +21,34 @@ An AI-powered sales intelligence platform that monitors news and generates perso
 1. Clone the repository
 2. Install dependencies: `npm install`
 3. Set up PostgreSQL database
-4. Add your OpenAI API key to environment variables
+4. Create a `.env` file in the root directory with required environment variables
 5. Run the development server: `npm run dev`
 
 ## Environment Variables
 
-- `DATABASE_URL`: PostgreSQL connection string
-- `OPENAI_API_KEY`: OpenAI API key for GPT integration
+Create a `.env` file in the root directory:
+
+```bash
+# Required
+DATABASE_URL=postgresql://user:password@localhost:5432/nbm_prospecting
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Optional
+NEWSAPI_KEY=your_newsapi_key_here  # Will skip NewsAPI if not set
+PORT=5000  # Defaults to 5000
+```
+
+### Setting up PostgreSQL
+
+You can use a local PostgreSQL instance or a cloud service like:
+- [Supabase](https://supabase.com) (free tier available)
+- [Neon](https://neon.tech) (free tier available)
+- [Railway](https://railway.app) (free tier available)
+
+After setting up your database, run the migration:
+```bash
+npm run db:push
+```
 
 ## Project Structure
 
