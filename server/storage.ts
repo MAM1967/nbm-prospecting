@@ -24,6 +24,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUserIndustry(userId: string, industry: string): Promise<void>;
+  getAllUsers(): Promise<User[]>;
   
   // Company operations
   getOrCreateCompany(data: InsertCompany): Promise<Company>;
@@ -76,6 +77,10 @@ export class Storage implements IStorage {
       .update(schema.users)
       .set({ selectedIndustry: industry })
       .where(eq(schema.users.id, userId));
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(schema.users);
   }
 
   async getOrCreateCompany(data: InsertCompany): Promise<Company> {

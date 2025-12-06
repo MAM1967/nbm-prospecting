@@ -28,7 +28,7 @@ const EVENT_KEYWORDS: Record<EventType, string[]> = {
   office_expansion: ['new office', 'opens headquarters', 'expands to', 'new location'],
 };
 
-export async function detectEvent(title: string, description: string): Promise<DetectedEvent | null> {
+export async function detectEvent(title: string, description: string, homepageSummary?: string): Promise<DetectedEvent | null> {
   const text = `${title} ${description}`.toLowerCase();
 
   // First, try keyword detection
@@ -48,39 +48,63 @@ export async function detectEvent(title: string, description: string): Promise<D
   }
 
   // Fallback to LLM (only if keywords didn't match)
-  return await detectEventWithLLM(title, description);
+  return await detectEventWithLLM(title, description, homepageSummary);
 }
 
-async function detectEventWithLLM(title: string, description: string): Promise<DetectedEvent | null> {
+async function detectEventWithLLM(title: string, description: string, homepageSummary?: string): Promise<DetectedEvent | null> {
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-5",
       messages: [
         {
           role: "system",
-          content: `You are an event detection system. Analyze news articles and detect these event types:
-- rebrand: Company rebrand or brand refresh
-- new_exec_hire: New executive hire (C-level or VP+)
-- thought_leadership_spike: Published articles, podcasts, speaking events
-- hiring_surge: Mass hiring or team expansion
-- m_and_a: Mergers and acquisitions
-- office_expansion: New office or geographic expansion
+          content: `You are an expert analyst specializing in B2B companies, professional services, 
+and fractional executive work. Your job is to:
+1. Classify corporate news events.
+2. Identify marketing, BD, and organizational issues implied by the event.
+3. Determine which internal roles are most affected.
+4. Generate human, concise, relevant cold-email conversation starters.
+5. Produce strictly formatted JSON as instructed.
 
-Return JSON: { "eventType": string | null, "confidence": 0-1, "companyName": string, "summary": string }
-If no relevant event, return eventType as null.`,
+Do not invent facts not supported by the input.
+Do not produce explanations outside of the JSON schema requested.`,
         },
         {
           role: "user",
-          content: `Title: ${title}\n\nDescription: ${description}`,
+          content: `INPUT:
+Article Title: ${title}
+Article Summary: ${description}
+Homepage Summary: ${homepageSummary || "N/A"}
+
+TASK:
+Classify this event into exactly ONE of the following types:
+- rebrand
+- new_exec_hire
+- thought_leadership_spike
+- hiring_surge
+- m_and_a
+- office_expansion
+
+Return ONLY:
+{
+  "event_type": "..."
+}`,
         },
       ],
       response_format: { type: "json_object" },
     });
 
     const result = JSON.parse(response.choices[0].message.content || '{}');
+    const eventType = result.event_type;
     
-    if (result.eventType && result.confidence > 0.6) {
-      return result as DetectedEvent;
+    if (eventType && Object.values(["rebrand", "new_exec_hire", "thought_leadership_spike", "hiring_surge", "m_and_a", "office_expansion"]).includes(eventType)) {
+      const companyName = extractCompanyName(title);
+      return {
+        eventType: eventType as EventType,
+        confidence: 0.8,
+        companyName: companyName || "Unknown",
+        summary: description.slice(0, 300),
+      };
     }
     
     return null;

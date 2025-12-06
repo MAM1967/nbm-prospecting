@@ -26,6 +26,7 @@ export const companies = pgTable("companies", {
   domain: text("domain"),
   industry: text("industry"),
   logoPlaceholder: text("logo_placeholder"),
+  homepageSummary: text("homepage_summary"), // Semantic summary from LLM analysis
   lastSeen: timestamp("last_seen").defaultNow(),
 });
 

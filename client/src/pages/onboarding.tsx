@@ -13,9 +13,34 @@ export default function Onboarding() {
   const [step, setStep] = useState(1);
   const [_, setLocation] = useLocation();
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (step === 1 && selectedIndustry) {
       setStep(2);
+      
+      // Save industry selection to backend
+      try {
+        // Get or create userId (for now, use localStorage)
+        let userId = localStorage.getItem("userId");
+        if (!userId) {
+          // Generate a simple userId for demo purposes
+          userId = `user-${Date.now()}`;
+          localStorage.setItem("userId", userId);
+        }
+
+        // Save industry preference
+        await fetch("/api/user/industry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, industry: selectedIndustry }),
+        });
+
+        // Store in localStorage for dashboard
+        localStorage.setItem("selectedIndustry", selectedIndustry);
+      } catch (error) {
+        console.error("Error saving industry:", error);
+        // Continue anyway
+      }
+
       // Simulate "Configuring Engine" delay
       setTimeout(() => {
         setLocation("/");

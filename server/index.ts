@@ -70,6 +70,12 @@ app.use((req, res, next) => {
     throw err;
   });
 
+  // Initialize weekly cron job in production
+  if (process.env.NODE_ENV === "production") {
+    const { setupWeeklyCron } = await import("./cron/weekly-intelligence");
+    setupWeeklyCron();
+  }
+
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes

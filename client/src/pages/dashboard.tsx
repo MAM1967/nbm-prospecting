@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { EventCard } from "@/components/dashboard/EventCard";
@@ -6,18 +6,20 @@ import { MOCK_EVENTS } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { SlidersHorizontal, Sparkles, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import type { Industry } from "@/lib/mock-data";
 
-async function fetchEvents() {
-  const response = await fetch("/api/events");
+async function fetchEvents(userId?: string) {
+  const url = userId ? `/api/events?userId=${userId}` : "/api/events";
+  const response = await fetch(url);
   if (!response.ok) throw new Error("Failed to fetch events");
   return response.json();
 }
 
-async function runIntelligenceEngine() {
+async function runIntelligenceEngine(industry: Industry) {
   const response = await fetch("/api/intelligence/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ industry: "Tech, SaaS, B2B software" }),
+    body: JSON.stringify({ industry }),
   });
   if (!response.ok) throw new Error("Failed to run intelligence engine");
   return response.json();
@@ -25,18 +27,28 @@ async function runIntelligenceEngine() {
 
 export default function Dashboard() {
   const [filter, setFilter] = useState("all");
+  const [selectedIndustry, setSelectedIndustry] = useState<Industry | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Load user industry from localStorage
+  useEffect(() => {
+    const industry = localStorage.getItem("selectedIndustry") as Industry | null;
+    const id = localStorage.getItem("userId");
+    setSelectedIndustry(industry);
+    setUserId(id);
+  }, []);
+
   // Fetch events from backend
   const { data: events = [], isLoading } = useQuery({
-    queryKey: ["events"],
-    queryFn: fetchEvents,
+    queryKey: ["events", userId],
+    queryFn: () => fetchEvents(userId || undefined),
   });
 
   // Mutation to trigger intelligence engine
   const runEngine = useMutation({
-    mutationFn: runIntelligenceEngine,
+    mutationFn: () => runIntelligenceEngine(selectedIndustry || "Tech, SaaS, B2B software"),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["events"] });
       toast({
@@ -64,7 +76,9 @@ export default function Dashboard() {
         <div>
           <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Intelligence Feed</h1>
           <p className="text-muted-foreground mt-1">
-            Weekly curated signals for <span className="font-medium text-foreground">Tech, SaaS, B2B Software</span>
+            Weekly curated signals for <span className="font-medium text-foreground">
+              {selectedIndustry || "Tech, SaaS, B2B Software"}
+            </span>
           </p>
           {usingMockData && (
             <p className="text-xs text-amber-600 mt-2 bg-amber-50 px-2 py-1 rounded inline-block">
